@@ -1,0 +1,98 @@
+diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/DeviceDataManager.swift
+--- a/Loop/Loop/Managers/DeviceDataManager.swift
++++ b/Loop/Loop/Managers/DeviceDataManager.swift
+@@ -15,6 +15,13 @@ import LoopTestingKit
+ import UserNotifications
+ import Combine
+ 
++private enum SupplyCompanionDefaultsKey {
++    static let podActivatedAt = "com.loopkit.supplyCompanion.podActivatedAt"
++    static let podExpiresAt = "com.loopkit.supplyCompanion.podExpiresAt"
++    static let sensorActivatedAt = "com.loopkit.supplyCompanion.sensorActivatedAt"
++    static let sensorIdentifier = "com.loopkit.supplyCompanion.sensorIdentifier"
++}
++
+ final class DeviceDataManager {
+ 
+     private let queue = DispatchQueue(label: "com.loopkit.DeviceManagerQueue", qos: .utility)
+@@ -107,6 +114,7 @@ final class DeviceDataManager {
+ 
+             NotificationCenter.default.post(name: .CGMManagerChanged, object: self, userInfo: nil)
+             rawCGMManager = cgmManager?.rawValue
++            exportCGMSupplyLifecycle(cgmManager)
+             UserDefaults.appGroup?.clearLegacyCGMManagerRawValue()
+         }
+     }
+@@ -138,6 +146,7 @@ final class DeviceDataManager {
+             NotificationCenter.default.post(name: .PumpManagerChanged, object: self, userInfo: nil)
+ 
+             rawPumpManager = pumpManager?.rawValue
++            exportPumpSupplyLifecycle(pumpManager)
+             UserDefaults.appGroup?.clearLegacyPumpManagerRawValue()
+         }
+     }
+@@ -768,6 +777,40 @@ private extension DeviceDataManager {
+         }
+     }
+ 
++    /// Publishes only supply lifecycle dates to the shared app group. This is intentionally
++    /// separate from glucose, insulin, dosing, and therapy-setting data.
++    private func exportCGMSupplyLifecycle(_ manager: CGMManager?) {
++        guard let manager = manager,
++              manager.pluginIdentifier == "G7CGMManager",
++              let defaults = UserDefaults.appGroup,
++              let activatedAt = manager.rawState["activatedAt"] as? Date
++        else {
++            return
++        }
++
++        defaults.set(activatedAt, forKey: SupplyCompanionDefaultsKey.sensorActivatedAt)
++        if let sensorIdentifier = manager.rawState["sensorID"] as? String {
++            defaults.set(sensorIdentifier, forKey: SupplyCompanionDefaultsKey.sensorIdentifier)
++        }
++    }
++
++    /// Publishes the active Omnipod lifecycle dates to the shared app group.
++    private func exportPumpSupplyLifecycle(_ manager: PumpManager?) {
++        guard let manager = manager,
++              manager.pluginIdentifier == "Omni",
++              let defaults = UserDefaults.appGroup,
++              let podState = manager.rawState["podState"] as? [String: Any],
++              let activatedAt = podState["activatedAt"] as? Date
++        else {
++            return
++        }
++
++        defaults.set(activatedAt, forKey: SupplyCompanionDefaultsKey.podActivatedAt)
++        if let expiresAt = podState["expiresAt"] as? Date {
++            defaults.set(expiresAt, forKey: SupplyCompanionDefaultsKey.podExpiresAt)
++        }
++    }
++
+     func setLastError(error: Error) {
+         DispatchQueue.main.async {
+             self.lastError = (date: Date(), error: error)
+@@ -1039,6 +1082,7 @@ extension DeviceDataManager: CGMManagerDelegate {
+     func cgmManagerDidUpdateState(_ manager: CGMManager) {
+         dispatchPrecondition(condition: .onQueue(queue))
+         rawCGMManager = manager.rawValue
++        exportCGMSupplyLifecycle(manager)
+     }
+ 
+     func credentialStoragePrefix(for manager: CGMManager) -> String {
+@@ -1088,6 +1132,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+         log.default("PumpManager:%{public}@ did update state", String(describing: type(of: pumpManager)))
+ 
+         rawPumpManager = pumpManager.rawValue
++        exportPumpSupplyLifecycle(pumpManager)
+     }
+     
+     func pumpManager(_ pumpManager: PumpManager, didRequestBasalRateScheduleChange basalRateSchedule: BasalRateSchedule, completion: @escaping (Error?) -> Void) {
+@@ -1193,6 +1238,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+     }
+ 
+     func pumpManagerPumpWasReplaced(_ pumpManager: PumpManager) {
++        exportPumpSupplyLifecycle(pumpManager)
+     }
+     
+     func pumpManagerWillDeactivate(_ pumpManager: PumpManager) {

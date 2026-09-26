@@ -1,7 +1,7 @@
 diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/DeviceDataManager.swift
 --- a/Loop/Loop/Managers/DeviceDataManager.swift
 +++ b/Loop/Loop/Managers/DeviceDataManager.swift
-@@ -15,6 +15,13 @@ import LoopTestingKit
+@@ -15,6 +15,18 @@ import LoopTestingKit
  import UserNotifications
  import Combine
  
@@ -10,12 +10,17 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
 +    static let podExpiresAt = "com.loopkit.supplyCompanion.podExpiresAt"
 +    static let sensorActivatedAt = "com.loopkit.supplyCompanion.sensorActivatedAt"
 +    static let sensorIdentifier = "com.loopkit.supplyCompanion.sensorIdentifier"
++    static let glucoseValue = "com.loopkit.supplyCompanion.glucoseValue"
++    static let glucoseUnit = "com.loopkit.supplyCompanion.glucoseUnit"
++    static let glucoseDate = "com.loopkit.supplyCompanion.glucoseDate"
++    static let reservoirUnits = "com.loopkit.supplyCompanion.reservoirUnits"
++    static let reservoirDate = "com.loopkit.supplyCompanion.reservoirDate"
 +}
 +
  final class DeviceDataManager {
  
      private let queue = DispatchQueue(label: "com.loopkit.DeviceManagerQueue", qos: .utility)
-@@ -107,6 +114,7 @@ final class DeviceDataManager {
+@@ -107,6 +119,7 @@ final class DeviceDataManager {
  
              NotificationCenter.default.post(name: .CGMManagerChanged, object: self, userInfo: nil)
              rawCGMManager = cgmManager?.rawValue
@@ -23,7 +28,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
              UserDefaults.appGroup?.clearLegacyCGMManagerRawValue()
          }
      }
-@@ -138,6 +146,7 @@ final class DeviceDataManager {
+@@ -138,6 +151,7 @@ final class DeviceDataManager {
              NotificationCenter.default.post(name: .PumpManagerChanged, object: self, userInfo: nil)
  
              rawPumpManager = pumpManager?.rawValue
@@ -31,12 +36,11 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
              UserDefaults.appGroup?.clearLegacyPumpManagerRawValue()
          }
      }
-@@ -768,6 +777,40 @@ private extension DeviceDataManager {
+@@ -768,6 +782,60 @@ private extension DeviceDataManager {
          }
      }
  
-+    /// Publishes only supply lifecycle dates to the shared app group. This is intentionally
-+    /// separate from glucose, insulin, dosing, and therapy-setting data.
++    /// Publishes only the read-only status values used by Diabetes Supply Companion.
 +    private func exportCGMSupplyLifecycle(_ manager: CGMManager?) {
 +        guard let manager = manager,
 +              manager.pluginIdentifier == "G7CGMManager",
@@ -52,7 +56,6 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
 +        }
 +    }
 +
-+    /// Publishes the active Omnipod lifecycle dates to the shared app group.
 +    private func exportPumpSupplyLifecycle(_ manager: PumpManager?) {
 +        guard let manager = manager,
 +              manager.pluginIdentifier == "Omni",
@@ -69,10 +72,32 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
 +        }
 +    }
 +
++    private func exportCurrentGlucose() {
++        guard let defaults = UserDefaults.appGroup,
++              let glucose = glucoseStore.latestGlucose
++        else {
++            return
++        }
++
++        let unit = preferredGlucoseUnit
++        defaults.set(glucose.quantity.doubleValue(for: unit), forKey: SupplyCompanionDefaultsKey.glucoseValue)
++        defaults.set(unit == .millimolesPerLiter ? "mmol/L" : "mg/dL", forKey: SupplyCompanionDefaultsKey.glucoseUnit)
++        defaults.set(glucose.startDate, forKey: SupplyCompanionDefaultsKey.glucoseDate)
++    }
++
++    private func exportReservoir(units: Double, at date: Date) {
++        guard let defaults = UserDefaults.appGroup else {
++            return
++        }
++
++        defaults.set(units, forKey: SupplyCompanionDefaultsKey.reservoirUnits)
++        defaults.set(date, forKey: SupplyCompanionDefaultsKey.reservoirDate)
++    }
++
      func setLastError(error: Error) {
          DispatchQueue.main.async {
              self.lastError = (date: Date(), error: error)
-@@ -1039,6 +1082,7 @@ extension DeviceDataManager: CGMManagerDelegate {
+@@ -1029,6 +1097,7 @@ extension DeviceDataManager: CGMManagerDelegate {
      func cgmManagerDidUpdateState(_ manager: CGMManager) {
          dispatchPrecondition(condition: .onQueue(queue))
          rawCGMManager = manager.rawValue
@@ -80,7 +105,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
  
      func credentialStoragePrefix(for manager: CGMManager) -> String {
-@@ -1088,6 +1132,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1078,6 +1147,7 @@ extension DeviceDataManager: PumpManagerDelegate {
          log.default("PumpManager:%{public}@ did update state", String(describing: type(of: pumpManager)))
  
          rawPumpManager = pumpManager.rawValue
@@ -88,7 +113,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
      
      func pumpManager(_ pumpManager: PumpManager, didRequestBasalRateScheduleChange basalRateSchedule: BasalRateSchedule, completion: @escaping (Error?) -> Void) {
-@@ -1193,6 +1238,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1183,6 +1253,7 @@ extension DeviceDataManager: PumpManagerDelegate {
      }
  
      func pumpManagerPumpWasReplaced(_ pumpManager: PumpManager) {
@@ -96,3 +121,19 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
      
      func pumpManagerWillDeactivate(_ pumpManager: PumpManager) {
+@@ -1237,6 +1308,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+     func pumpManager(_ pumpManager: PumpManager, didReadReservoirValue units: Double, at date: Date, completion: @escaping (_ result: Swift.Result<(newValue: ReservoirValue, lastValue: ReservoirValue?, areStoredValuesContinuous: Bool), Error>) -> Void) {
+         dispatchPrecondition(condition: .onQueue(queue))
+         log.default("PumpManager:%{public}@ did read reservoir value", String(describing: type(of: pumpManager)))
++        exportReservoir(units: units, at: date)
+ 
+         loopManager.addReservoirValue(units, at: date) { (result) in
+             switch result {
+@@ -1315,6 +1387,7 @@ extension DeviceDataManager: DosingDecisionStoreDelegate {
+ // MARK: - GlucoseStoreDelegate
+ extension DeviceDataManager: GlucoseStoreDelegate {
+     func glucoseStoreHasUpdatedGlucoseData(_ glucoseStore: GlucoseStore) {
++        exportCurrentGlucose()
+         remoteDataServicesManager.triggerUpload(for: .glucose)
+     }
+ }

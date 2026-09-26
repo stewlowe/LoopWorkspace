@@ -36,7 +36,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
              UserDefaults.appGroup?.clearLegacyPumpManagerRawValue()
          }
      }
-@@ -768,6 +782,60 @@ private extension DeviceDataManager {
+@@ -768,6 +782,68 @@ private extension DeviceDataManager {
          }
      }
  
@@ -94,10 +94,18 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
 +        defaults.set(date, forKey: SupplyCompanionDefaultsKey.reservoirDate)
 +    }
 +
++    private func exportStoredReservoir() {
++        guard let reservoir = doseStore.lastReservoirValue else {
++            return
++        }
++
++        exportReservoir(units: reservoir.unitVolume, at: reservoir.startDate)
++    }
++
      func setLastError(error: Error) {
          DispatchQueue.main.async {
              self.lastError = (date: Date(), error: error)
-@@ -1029,6 +1097,7 @@ extension DeviceDataManager: CGMManagerDelegate {
+@@ -1039,6 +1115,7 @@ extension DeviceDataManager: CGMManagerDelegate {
      func cgmManagerDidUpdateState(_ manager: CGMManager) {
          dispatchPrecondition(condition: .onQueue(queue))
          rawCGMManager = manager.rawValue
@@ -105,7 +113,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
  
      func credentialStoragePrefix(for manager: CGMManager) -> String {
-@@ -1078,6 +1147,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1088,6 +1165,7 @@ extension DeviceDataManager: PumpManagerDelegate {
          log.default("PumpManager:%{public}@ did update state", String(describing: type(of: pumpManager)))
  
          rawPumpManager = pumpManager.rawValue
@@ -113,7 +121,15 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
      
      func pumpManager(_ pumpManager: PumpManager, didRequestBasalRateScheduleChange basalRateSchedule: BasalRateSchedule, completion: @escaping (Error?) -> Void) {
-@@ -1183,6 +1253,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1151,6 +1229,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+     func pumpManager(_ pumpManager: PumpManager, didUpdate status: PumpManagerStatus, oldStatus: PumpManagerStatus) {
+         dispatchPrecondition(condition: .onQueue(queue))
+         log.default("PumpManager:%{public}@ did update status: %{public}@", String(describing: type(of: pumpManager)), String(describing: status))
++        exportStoredReservoir()
+ 
+         doseStore.device = status.device
+         
+@@ -1193,6 +1272,7 @@ extension DeviceDataManager: PumpManagerDelegate {
      }
  
      func pumpManagerPumpWasReplaced(_ pumpManager: PumpManager) {
@@ -121,7 +137,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
      
      func pumpManagerWillDeactivate(_ pumpManager: PumpManager) {
-@@ -1237,6 +1308,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1247,6 +1327,7 @@ extension DeviceDataManager: PumpManagerDelegate {
      func pumpManager(_ pumpManager: PumpManager, didReadReservoirValue units: Double, at date: Date, completion: @escaping (_ result: Swift.Result<(newValue: ReservoirValue, lastValue: ReservoirValue?, areStoredValuesContinuous: Bool), Error>) -> Void) {
          dispatchPrecondition(condition: .onQueue(queue))
          log.default("PumpManager:%{public}@ did read reservoir value", String(describing: type(of: pumpManager)))
@@ -129,11 +145,12 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
  
          loopManager.addReservoirValue(units, at: date) { (result) in
              switch result {
-@@ -1315,6 +1387,7 @@ extension DeviceDataManager: DosingDecisionStoreDelegate {
+@@ -1325,6 +1406,8 @@ extension DeviceDataManager: DosingDecisionStoreDelegate {
  // MARK: - GlucoseStoreDelegate
  extension DeviceDataManager: GlucoseStoreDelegate {
      func glucoseStoreHasUpdatedGlucoseData(_ glucoseStore: GlucoseStore) {
 +        exportCurrentGlucose()
++        exportStoredReservoir()
          remoteDataServicesManager.triggerUpload(for: .glucose)
      }
  }

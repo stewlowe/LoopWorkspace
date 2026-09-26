@@ -1,4 +1,5 @@
 diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/DeviceDataManager.swift
+index 3d07128e..e7b50946 100644
 --- a/Loop/Loop/Managers/DeviceDataManager.swift
 +++ b/Loop/Loop/Managers/DeviceDataManager.swift
 @@ -15,6 +15,18 @@ import LoopTestingKit
@@ -36,7 +37,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
              UserDefaults.appGroup?.clearLegacyPumpManagerRawValue()
          }
      }
-@@ -768,6 +782,68 @@ private extension DeviceDataManager {
+@@ -768,6 +782,97 @@ private extension DeviceDataManager {
          }
      }
  
@@ -66,9 +67,15 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
 +            return
 +        }
 +
++        let previousActivatedAt = defaults.object(forKey: SupplyCompanionDefaultsKey.podActivatedAt) as? Date
 +        defaults.set(activatedAt, forKey: SupplyCompanionDefaultsKey.podActivatedAt)
 +        if let expiresAt = podState["expiresAt"] as? Date {
 +            defaults.set(expiresAt, forKey: SupplyCompanionDefaultsKey.podExpiresAt)
++        }
++
++        if !exportPumpReservoir(manager), previousActivatedAt != activatedAt {
++            defaults.removeObject(forKey: SupplyCompanionDefaultsKey.reservoirUnits)
++            defaults.removeObject(forKey: SupplyCompanionDefaultsKey.reservoirDate)
 +        }
 +    }
 +
@@ -94,7 +101,30 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
 +        defaults.set(date, forKey: SupplyCompanionDefaultsKey.reservoirDate)
 +    }
 +
++    /// Omnipod intentionally does not send its usual reservoir delegate callback
++    /// while the level is the special "50+ U" value. Prefer the current Pod's
++    /// persisted status so an old Pod's final reading cannot overwrite it.
++    @discardableResult
++    private func exportPumpReservoir(_ manager: PumpManager?) -> Bool {
++        guard let manager = manager,
++              manager.pluginIdentifier == "Omni",
++              let podState = manager.rawState["podState"] as? [String: Any],
++              let measurements = podState["lastInsulinMeasurements"] as? [String: Any],
++              let reservoirLevel = measurements["reservoirLevel"] as? Double,
++              let validTime = measurements["validTime"] as? Date
++        else {
++            return false
++        }
++
++        exportReservoir(units: reservoirLevel, at: validTime)
++        return true
++    }
++
 +    private func exportStoredReservoir() {
++        if exportPumpReservoir(pumpManager) {
++            return
++        }
++
 +        guard let reservoir = doseStore.lastReservoirValue else {
 +            return
 +        }
@@ -105,7 +135,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      func setLastError(error: Error) {
          DispatchQueue.main.async {
              self.lastError = (date: Date(), error: error)
-@@ -1039,6 +1115,7 @@ extension DeviceDataManager: CGMManagerDelegate {
+@@ -1039,6 +1144,7 @@ extension DeviceDataManager: CGMManagerDelegate {
      func cgmManagerDidUpdateState(_ manager: CGMManager) {
          dispatchPrecondition(condition: .onQueue(queue))
          rawCGMManager = manager.rawValue
@@ -113,7 +143,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
  
      func credentialStoragePrefix(for manager: CGMManager) -> String {
-@@ -1088,6 +1165,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1088,6 +1194,7 @@ extension DeviceDataManager: PumpManagerDelegate {
          log.default("PumpManager:%{public}@ did update state", String(describing: type(of: pumpManager)))
  
          rawPumpManager = pumpManager.rawValue
@@ -121,7 +151,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
      
      func pumpManager(_ pumpManager: PumpManager, didRequestBasalRateScheduleChange basalRateSchedule: BasalRateSchedule, completion: @escaping (Error?) -> Void) {
-@@ -1151,6 +1229,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1151,6 +1258,7 @@ extension DeviceDataManager: PumpManagerDelegate {
      func pumpManager(_ pumpManager: PumpManager, didUpdate status: PumpManagerStatus, oldStatus: PumpManagerStatus) {
          dispatchPrecondition(condition: .onQueue(queue))
          log.default("PumpManager:%{public}@ did update status: %{public}@", String(describing: type(of: pumpManager)), String(describing: status))
@@ -129,7 +159,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
  
          doseStore.device = status.device
          
-@@ -1193,6 +1272,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1193,6 +1301,7 @@ extension DeviceDataManager: PumpManagerDelegate {
      }
  
      func pumpManagerPumpWasReplaced(_ pumpManager: PumpManager) {
@@ -137,7 +167,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
      }
      
      func pumpManagerWillDeactivate(_ pumpManager: PumpManager) {
-@@ -1247,6 +1327,7 @@ extension DeviceDataManager: PumpManagerDelegate {
+@@ -1247,6 +1356,7 @@ extension DeviceDataManager: PumpManagerDelegate {
      func pumpManager(_ pumpManager: PumpManager, didReadReservoirValue units: Double, at date: Date, completion: @escaping (_ result: Swift.Result<(newValue: ReservoirValue, lastValue: ReservoirValue?, areStoredValuesContinuous: Bool), Error>) -> Void) {
          dispatchPrecondition(condition: .onQueue(queue))
          log.default("PumpManager:%{public}@ did read reservoir value", String(describing: type(of: pumpManager)))
@@ -145,7 +175,7 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
  
          loopManager.addReservoirValue(units, at: date) { (result) in
              switch result {
-@@ -1325,6 +1406,8 @@ extension DeviceDataManager: DosingDecisionStoreDelegate {
+@@ -1325,6 +1435,8 @@ extension DeviceDataManager: DosingDecisionStoreDelegate {
  // MARK: - GlucoseStoreDelegate
  extension DeviceDataManager: GlucoseStoreDelegate {
      func glucoseStoreHasUpdatedGlucoseData(_ glucoseStore: GlucoseStore) {
@@ -154,3 +184,4 @@ diff --git a/Loop/Loop/Managers/DeviceDataManager.swift b/Loop/Loop/Managers/Dev
          remoteDataServicesManager.triggerUpload(for: .glucose)
      }
  }
+
